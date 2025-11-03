@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>frontend-incipit</title>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <!-- Shim jQuery mínimo con soporte para IDs que empiezan por número -->
+    <!-- <script>
+      (function () {
+        function $shim(sel) {
+          let el = null;
+
+          // Si es un selector #id con dígitos al inicio, usa getElementById
+          if (typeof sel === "string" && sel.startsWith("#")) {
+            el = document.getElementById(sel.slice(1));
+          } else if (typeof sel === "string") {
+            try {
+              el = document.querySelector(sel);
+            } catch (e) {
+              el = null;
+            }
+          } else if (sel instanceof Element) {
+            el = sel;
+          }
+
+          return {
+            0: el,
+            length: el ? 1 : 0,
+            val(v) {
+              if (arguments.length) {
+                if (el) el.value = v;
+                return this;
+              }
+              return el ? el.value : undefined;
+            },
+            trigger(ev) {
+              if (el) el.dispatchEvent(new Event(ev, { bubbles: true }));
+              return this;
+            },
+            on(ev, cb) {
+              if (el) el.addEventListener(ev, cb);
+              return this;
+            },
+            off(ev, cb) {
+              if (el) el.removeEventListener(ev, cb);
+              return this;
+            }
+          };
+        }
+        // No pises jQuery real si existe
+        if (!window.$) window.$ = $shim;
+      })();
+    </script> -->
+
+    <script>
+      (function () {
+        function $shim(sel) {
+          let el = null;
+          if (typeof sel === "string" && sel.startsWith("#")) {
+            el = document.getElementById(sel.slice(1)); // IDs que empiezan por número (031p)
+          } else if (typeof sel === "string") {
+            try {
+              el = document.querySelector(sel);
+            } catch {
+              el = null;
+            }
+          } else if (sel instanceof Element) {
+            el = sel;
+          }
+          return {
+            0: el,
+            length: el ? 1 : 0,
+            val(v) {
+              if (arguments.length) {
+                if (el) el.value = v;
+                return this;
+              }
+              return el ? el.value : undefined;
+            },
+            trigger(ev) {
+              if (el) el.dispatchEvent(new Event(ev, { bubbles: true }));
+              return this;
+            },
+            on(ev, cb) {
+              if (el) el.addEventListener(ev, cb);
+              return this;
+            },
+            off(ev, cb) {
+              if (el) el.removeEventListener(ev, cb);
+              return this;
+            }
+          };
+        }
+        if (!window.$) window.$ = $shim;
+        if (!window.jQuery) window.jQuery = window.$;
+      })();
+    </script>
+
+    <!-- Código legacy -->
+    <script src="/legacy/incipitManager.js"></script>
+
+    <script src="/legacy/incipitManager.js"></script>
+
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

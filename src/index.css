@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.music-font {
+  font-family: "Maestro", "Bravura Text", "Bravura", "Petaluma", "Noto Music",
+    serif;
+  line-height: 1;
+}
