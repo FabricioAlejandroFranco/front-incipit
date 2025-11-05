@@ -1,192 +1,346 @@
-import { useEffect, useRef } from "react";
+// src/components/IncipitMenuClassic.jsx
+import { useEffect, useMemo, useState } from "react";
 
-export default function IncipitCanvas({
-  pae = "",
-  mode = "list", // "edit" = interactivo (legacy op "add"), "list" = solo render
-  width = 800,
-  height = 220,
-  className = "block w-full bg-white border rounded",
-  clickToInsert = true // click inserta el token de la paleta
-}) {
-  const canvasRef = useRef(null);
-  const instanceRef = useRef(null);
+/* ========= Bridges al legacy ========= */
+const readBridge = (id) => (document.getElementById(id)?.value || "").trim();
+const writeBridge = (id, v) => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.value = v;
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+};
+const syncLegacyPAE = (pae) => {
+  writeBridge("031p", pae);
+  writeBridge("incipitPaec", pae);
+  window.dispatchEvent(new CustomEvent("incipit:sync"));
+};
 
-  // Cabeceras por defecto (clave, compás; armadura neutra la aporta combinedPAE)
-  const SEED_PAE = "%G-2 @4/4";
+/* ========= Helpers PAE ========= */
+const SHARP_ORDER = ["F", "C", "G", "D", "A", "E", "B"];
+const FLAT_ORDER = ["B", "E", "A", "D", "G", "C", "F"];
+const makeKeyPAE = (n) => {
+  if (!Number.isFinite(n) || n === 0) return "$x";
+  return n > 0
+    ? "$" + SHARP_ORDER.slice(0, n).join("")
+    : "$b" + FLAT_ORDER.slice(0, Math.abs(n)).join("");
+};
 
-  const ensureId = (el) => {
-    if (!el.id) el.id = "incipit_" + Math.random().toString(36).slice(2);
-    return el.id;
-  };
+const CLEFS = [
+  { label: "G-2", pae: "%G-2" },
+  { label: "F-4", pae: "%F-4" },
+  { label: "C-3", pae: "%C-3" },
+  { label: "C-4", pae: "%C-4" },
+  { label: "G-1", pae: "%G-1" },
+  { label: "F-3", pae: "%F-3" }
+];
 
-  const waitFontsAndFrame = async () => {
-    await new Promise((r) => requestAnimationFrame(r));
-    if (document.fonts?.ready) {
-      try {
-        await document.fonts.ready;
-      } catch {}
-    }
-  };
+const DUR_NOTES = [
+  { d: 1, glyph: "𝅝", title: "Semibreve (1)" },
+  { d: 2, glyph: "𝅗𝅥", title: "Mínima (2)" },
+  { d: 4, glyph: "♩", title: "Negra (4)" },
+  { d: 8, glyph: "♪", title: "Corchea (8)" },
+  { d: 16, glyph: "♫", title: "Semicorchea (16)" },
+  { d: 32, glyph: "𝅘𝅥𝅯", title: "Fusa (32)" }
+];
 
-  const destroy = () => {
-    try {
-      instanceRef.current?.destroy?.();
-    } catch {}
-    instanceRef.current = null;
-  };
+const RESTS = [
+  { d: 1, glyph: "𝄻", title: "Silencio 1" },
+  { d: 2, glyph: "𝄼", title: "Silencio 2" },
+  { d: 4, glyph: "𝄽", title: "Silencio 4" },
+  { d: 8, glyph: "𝄾", title: "Silencio 8" },
+  { d: 16, glyph: "𝄿", title: "Silencio 16" }
+];
 
-  const initLegacy = (canvasId, operation, paeStr) => {
-    if (!window.CanvasClass) {
-      console.error("CanvasClass no está cargado.");
-      return;
-    }
-    destroy();
-    const inst = new window.CanvasClass();
-    instanceRef.current = inst;
-    inst.initializeCanvas(canvasId, operation, paeStr);
-  };
+const PITCHES = ["C", "D", "E", "F", "G", "A", "B"];
+const OCTS = [
+  { o: ",,", label: ",," },
+  { o: ",", label: "," },
+  { o: "", label: "•" },
+  { o: "'", label: "'" },
+  { o: "''", label: "''" }
+];
+const ACCS = [
+  { a: "", label: "—" },
+  { a: "#", label: "♯" },
+  { a: "b", label: "♭" },
+  { a: "n", label: "♮" }
+];
 
-  const read = (id) => (document.getElementById(id)?.value || "").trim();
-  const write = (id, v) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    const next = (v || "").trim();
-    if ((el.value || "").trim() === next) return;
-    el.value = next;
-    el.dispatchEvent(new Event("change", { bubbles: true }));
-  };
+export default function IncipitMenuClassic() {
+  // Estado de inserción
+  const [dur, setDur] = useState(4);
+  const [dot, setDot] = useState(false);
+  const [pitch, setPitch] = useState("C");
+  const [oct, setOct] = useState("");
+  const [acc, setAcc] = useState("");
+  const [ks, setKs] = useState(0); // armadura −7..+7
+  const [clef, setClef] = useState("%G-2");
+  const [space, setSpace] = useState(true);
 
-  // Construye PAE completo (cabeceras + cuerpo) desde los bridges
-  const combinedPAE = () => {
-    const g = read("031g") || "%G-2";
-    const n = read("031n") || "$x";
-    const o = read("031o") || "@4/4";
-    const p = read("031p") || read("incipitPaec") || "";
-    return [g, n, o, p].filter(Boolean).join(" ").trim();
-  };
+  // Token PAE de la próxima nota
+  const token = useMemo(
+    () => `${dur}${pitch}${oct}${acc}${dot ? "." : ""}`,
+    [dur, pitch, oct, acc, dot]
+  );
 
-  // --- EDITOR: inicializa una sola vez ---
+  // Publica token para click-to-insert en el canvas
   useEffect(() => {
-    if (mode === "list") return;
-
-    let canceled = false;
-    const el = canvasRef.current;
-    if (!el) return;
-    const id = ensureId(el);
-
-    (async () => {
-      await waitFontsAndFrame();
-      if (canceled) return;
-
-      const op = "add";
-      const initial = pae && pae.trim().startsWith("%") ? pae.trim() : SEED_PAE;
-
-      try {
-        initLegacy(id, op, initial);
-      } catch (e1) {
-        console.error("init editor 1:", e1);
-        try {
-          initLegacy(id, op, SEED_PAE);
-        } catch (e2) {
-          console.error("init editor 2:", e2);
-        }
-      }
-
-      // Click-to-insert (opcional)
-      const onClick = (ev) => {
-        if (!clickToInsert || ev.button !== 0) return;
-        const token = (window.__PAE_TOKEN || "").trim();
-        if (!token) return;
-        const cur = read("031p") || read("incipitPaec");
-        const sep = cur ? " " : "";
-        const next = (cur + sep + token).trim();
-        write("031p", next);
-        write("incipitPaec", next);
-        window.dispatchEvent(new CustomEvent("incipit:sync"));
-      };
-      const onCtx = (ev) => ev.preventDefault();
-
-      // 🔔 SIEMPRE escucha estos eventos (aunque clickToInsert sea false)
-      const onSync = () => {
-        try {
-          const full = combinedPAE() || SEED_PAE;
-          instanceRef.current?.initializeCanvas(id, "add", full);
-        } catch (e) {
-          console.error("incipit:sync redraw failed:", e);
-        }
-      };
-      const onClear = () => {
-        try {
-          // Limpia cuerpo y redibuja solo cabeceras
-          write("031p", "");
-          write("incipitPaec", "");
-          const full = combinedPAE() || SEED_PAE;
-          instanceRef.current?.initializeCanvas(id, "add", full);
-        } catch (e) {
-          console.error("incipit:clear failed:", e);
-        }
-      };
-      const onRedraw = () => onSync();
-
-      el.addEventListener("click", onClick);
-      el.addEventListener("contextmenu", onCtx);
-      window.addEventListener("incipit:sync", onSync);
-      window.addEventListener("incipit:clear", onClear);
-      window.addEventListener("incipit:redraw", onRedraw);
-
-      return () => {
-        el.removeEventListener("click", onClick);
-        el.removeEventListener("contextmenu", onCtx);
-        window.removeEventListener("incipit:sync", onSync);
-        window.removeEventListener("incipit:clear", onClear);
-        window.removeEventListener("incipit:redraw", onRedraw);
-      };
-    })();
-
+    window.__PAE_TOKEN = token;
     return () => {
-      canceled = true;
-      destroy();
+      if (window.__PAE_TOKEN === token) delete window.__PAE_TOKEN;
     };
-  }, [mode, clickToInsert]);
+  }, [token]);
 
-  // --- LISTA: renderiza cada vez que cambie `pae` ---
-  useEffect(() => {
-    if (mode !== "list") return;
+  // Inserta en $p manteniendo (opcional) espacio separador
+  const appendToken = (t) => {
+    const cur = readBridge("031p");
+    const sep = cur && space ? " " : "";
+    syncLegacyPAE((cur + sep + t).trim());
+  };
 
-    let canceled = false;
-    const el = canvasRef.current;
-    if (!el) return;
-    const id = ensureId(el);
+  const insertNote = (customDur) => {
+    const d = customDur ?? dur;
+    appendToken(`${d}${pitch}${oct}${acc}${dot ? "." : ""}`);
+  };
+  const insertRest = (d = dur) => appendToken(`${d}r`);
+  const insertBar = (kind = "/") => appendToken(kind);
+  const insertTie = () => appendToken("=");
 
-    (async () => {
-      await waitFontsAndFrame();
-      if (canceled) return;
-      const op = "list";
-      const val = (pae || "").trim();
-      try {
-        initLegacy(id, op, val || SEED_PAE);
-      } catch (e1) {
-        console.error("init list 1:", e1);
-        try {
-          initLegacy(id, op, SEED_PAE);
-        } catch (e2) {
-          console.error("init list 2:", e2);
-        }
-      }
-    })();
+  const undoLast = () => {
+    const cur = readBridge("031p");
+    if (!cur) return;
+    const arr = cur.split(/\s+/);
+    arr.pop();
+    syncLegacyPAE(arr.join(" ").trim());
+  };
+  const clearAll = () => {
+    writeBridge("031p", "");
+    writeBridge("incipitPaec", "");
+    // notifica limpieza inmediata al canvas
+    window.dispatchEvent(new Event("incipit:clear"));
+  };
 
-    return () => {
-      canceled = true;
-      destroy();
-    };
-  }, [pae, mode]);
+  // Cabeceras
+  const applyClef = (p) => {
+    setClef(p);
+    writeBridge("031g", p);
+    window.dispatchEvent(new CustomEvent("incipit:sync"));
+  };
+  const applyKey = (n) => {
+    setKs(n);
+    writeBridge("031n", makeKeyPAE(n));
+    window.dispatchEvent(new CustomEvent("incipit:sync"));
+  };
 
   return (
-    <canvas
-      ref={canvasRef}
-      width={width}
-      height={height}
-      className={className}
-    />
+    <div className="grid gap-4 p-3 rounded border bg-white/90">
+      {/* Alteraciones */}
+      <section>
+        <div className="font-semibold mb-1">Alteraciones:</div>
+        <div className="flex gap-2 items-center">
+          {ACCS.map(({ a, label }) => (
+            <button
+              key={label}
+              onClick={() => setAcc(a)}
+              className={`px-2 py-1 rounded border text-xl music-font ${
+                acc === a ? "bg-black text-white" : ""
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+          <label className="ml-3 text-xs inline-flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={dot}
+              onChange={(e) => setDot(e.target.checked)}
+            />
+            Puntillo
+          </label>
+        </div>
+      </section>
+
+      {/* Armadura */}
+      <section>
+        <div className="font-semibold mb-1">Armadura de Compás:</div>
+        <div className="flex items-center gap-2">
+          <input
+            type="range"
+            min={-7}
+            max={7}
+            step={1}
+            value={ks}
+            onChange={(e) => applyKey(Number(e.target.value))}
+          />
+          <span className="w-28 text-center text-sm">
+            {ks > 0 ? `+${ks} ♯` : ks < 0 ? `${ks} ♭` : "0 (sin)"}
+          </span>
+          <button
+            className="px-2 py-1 rounded border text-xs"
+            onClick={() => applyKey(0)}
+          >
+            Quitar
+          </button>
+        </div>
+      </section>
+
+      {/* Barras */}
+      <section>
+        <div className="font-semibold mb-1">Barras de Compás:</div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="px-2 py-1 rounded border"
+            onClick={() => insertBar("/")}
+          >
+            |
+          </button>
+          <button
+            className="px-2 py-1 rounded border"
+            onClick={() => insertBar("//")}
+          >
+            ||
+          </button>
+          <button
+            className="px-2 py-1 rounded border"
+            onClick={() => insertBar(":/")}
+          >
+            |:
+          </button>
+          <button
+            className="px-2 py-1 rounded border"
+            onClick={() => insertBar("/:")}
+          >
+            :|
+          </button>
+          <button
+            className="px-2 py-1 rounded border"
+            onClick={() => insertBar(":/:")}
+          >
+            :|:
+          </button>
+        </div>
+      </section>
+
+      {/* Figuras rítmicas */}
+      <section>
+        <div className="font-semibold mb-1">Figuras Rítmicas:</div>
+
+        {/* Notas: al pulsar, selecciona duración y además inserta una nota */}
+        <div className="flex flex-wrap items-center gap-2 mb-2">
+          {DUR_NOTES.map(({ d, glyph, title }) => (
+            <button
+              key={`n${d}`}
+              title={title}
+              onClick={(e) => {
+                setDur(d);
+                if (e.ctrlKey) return; // Ctrl = solo seleccionar
+                insertNote(d); // Click normal = insertar
+              }}
+              className={`px-2 py-1 rounded border text-xl music-font ${
+                dur === d ? "bg-black text-white" : ""
+              }`}
+            >
+              {glyph}
+            </button>
+          ))}
+          <button
+            className="ml-3 px-3 py-1 rounded border"
+            onClick={() => insertNote()}
+          >
+            Insertar Nota <span className="ml-1 font-mono">{token}</span>
+          </button>
+        </div>
+
+        {/* Silencios */}
+        <div className="flex flex-wrap items-center gap-2">
+          {RESTS.map(({ d, glyph, title }) => (
+            <button
+              key={`r${d}`}
+              title={title}
+              onClick={() => insertRest(d)}
+              className="px-2 py-1 rounded border text-xl music-font"
+            >
+              {glyph}
+            </button>
+          ))}
+          <button className="ml-3 px-3 py-1 rounded border" onClick={insertTie}>
+            Ligadura =
+          </button>
+        </div>
+      </section>
+
+      {/* Claves */}
+      <section>
+        <div className="font-semibold mb-1">Claves:</div>
+        <div className="flex flex-wrap gap-2">
+          {CLEFS.map((c) => (
+            <button
+              key={c.pae}
+              onClick={() => applyClef(c.pae)}
+              className={`px-2 py-1 rounded border text-sm ${
+                clef === c.pae ? "bg-black text-white" : ""
+              }`}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* Altura / Octava */}
+      <section className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">Altura:</span>
+          <div className="flex gap-1">
+            {PITCHES.map((p) => (
+              <button
+                key={p}
+                onClick={() => setPitch(p)}
+                className={`px-2 py-1 rounded border ${
+                  pitch === p ? "bg-black text-white" : ""
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">Octava:</span>
+          <div className="flex gap-1">
+            {OCTS.map(({ o, label }) => (
+              <button
+                key={label}
+                onClick={() => setOct(o)}
+                className={`px-2 py-1 rounded border text-sm ${
+                  oct === o ? "bg-black text-white" : ""
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <label className="ml-auto inline-flex items-center gap-2 text-xs">
+          <input
+            type="checkbox"
+            checked={space}
+            onChange={(e) => setSpace(e.target.checked)}
+          />
+          Espaciar tokens
+        </label>
+
+        <div className="flex gap-2">
+          <button className="px-3 py-1 rounded border" onClick={undoLast}>
+            Deshacer
+          </button>
+          <button className="px-3 py-1 rounded border" onClick={clearAll}>
+            Limpiar
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }

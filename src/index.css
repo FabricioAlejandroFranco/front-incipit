@@ -2,8 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
+/* index.css: fuente Maestro y clase de ayuda */
+@font-face {
+  font-family: "Maestro";
+  src: url("/fonts/Maestro.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 .music-font {
-  font-family: "Maestro", "Bravura Text", "Bravura", "Petaluma", "Noto Music",
-    serif;
-  line-height: 1;
+  font-family: "Maestro", serif;
 }

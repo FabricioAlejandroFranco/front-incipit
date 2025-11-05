@@ -40,9 +40,3 @@
 .read-the-docs {
   color: #888;
 }
-@font-face {
-  font-family: "Maestro";
-  src: url("/fonts/Maestro.otf") format("opentype"); /* ó .ttf */
-  font-display: swap;
-  font-weight: bold;
-}
